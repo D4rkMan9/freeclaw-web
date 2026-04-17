@@ -36,8 +36,8 @@ class AnthropicToOpenAIConverter:
         result = []
 
         for msg in messages:
-            role = msg.role
-            content = msg.content
+            role = get_block_attr(msg, "role")
+            content = get_block_attr(msg, "content")
 
             if isinstance(content, str):
                 result.append({"role": role, "content": content})
@@ -152,17 +152,40 @@ class AnthropicToOpenAIConverter:
     @staticmethod
     def convert_tools(tools: list[Any]) -> list[dict[str, Any]]:
         """Convert Anthropic tools to OpenAI format."""
-        return [
-            {
+        result = []
+        for tool in tools:
+            name = get_block_attr(tool, "name")
+            description = get_block_attr(tool, "description") or ""
+            input_schema = get_block_attr(tool, "input_schema")
+            # For builtin tools, input_schema may be None; use empty dict
+            parameters = input_schema if input_schema is not None else {}
+            result.append({
                 "type": "function",
                 "function": {
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "parameters": tool.input_schema,
+                    "name": name,
+                    "description": description,
+                    "parameters": parameters,
                 },
-            }
-            for tool in tools
-        ]
+            })
+        return result
+
+    @staticmethod
+    def convert_tool_choice(tool_choice: Any) -> dict[str, Any] | None:
+        """Convert Anthropic tool_choice to OpenAI format."""
+        if tool_choice is None:
+            return None
+        t = get_block_attr(tool_choice, "type")
+        name = get_block_attr(tool_choice, "name")
+        if t in ("tool", "builtin") and name:
+            return {"type": "function", "function": {"name": name}}
+        elif t in ("auto", "any"):
+            return {"type": "auto"}
+        elif t == "none":
+            return {"type": "none"}
+        # If already in OpenAI format (has 'function' key), return as is
+        if isinstance(tool_choice, dict) and "function" in tool_choice:
+            return tool_choice
+        return None
 
     @staticmethod
     def convert_system_prompt(system: Any) -> dict[str, str] | None:
@@ -220,7 +243,6 @@ def build_base_request_body(
     if tools:
         body["tools"] = AnthropicToOpenAIConverter.convert_tools(tools)
     tool_choice = getattr(request_data, "tool_choice", None)
-    if tool_choice:
-        body["tool_choice"] = tool_choice
+    set_if_not_none(body, "tool_choice", AnthropicToOpenAIConverter.convert_tool_choice(tool_choice))
 
     return body

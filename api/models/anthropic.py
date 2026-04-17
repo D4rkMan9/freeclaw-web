@@ -70,9 +70,22 @@ class Message(BaseModel):
 
 
 class Tool(BaseModel):
-    name: str
+    name: str | None = None
     description: str | None = None
-    input_schema: dict[str, Any]
+    input_schema: dict[str, Any] | None = None
+    type: str | None = None
+
+    @model_validator(mode="after")
+    def validate_tool(self) -> Tool:
+        # Built-in tool (e.g., web_search_20250305): only requires type
+        if self.type:
+            return self
+        # Custom tool: requires name and input_schema
+        if not self.name:
+            raise ValueError("Custom tool must have 'name'")
+        if self.input_schema is None:
+            raise ValueError("Custom tool must have 'input_schema'")
+        return self
 
 
 class ThinkingConfig(BaseModel):
