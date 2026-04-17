@@ -15,13 +15,13 @@ import httpx
 from loguru import logger
 
 from .models.anthropic import Tool
+from config.settings import get_settings
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 TAVILY_API_URL = "https://api.tavily.com/search"
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 
 # The built-in tool type Claude Code sends
 ANTHROPIC_WEB_SEARCH_TYPE = "web_search_20250305"
@@ -118,12 +118,14 @@ def strip_and_replace_web_search_tool(request_data):
 
 async def tavily_search(query: str, max_results: int = 5) -> str:
     """Call Tavily search API and return formatted results as a string."""
-    if not TAVILY_API_KEY:
+    settings = get_settings()
+    api_key = settings.tavily_api_key
+    if not api_key:
         print("[WEB_SEARCH] TAVILY_API_KEY not set")
         return "Error: TAVILY_API_KEY is not configured. Add it to your .env file."
 
     payload = {
-        "api_key": TAVILY_API_KEY,
+        "api_key": api_key,
         "query": query,
         "max_results": max_results,
         "search_depth": "basic",

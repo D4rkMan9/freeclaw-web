@@ -26,6 +26,8 @@ class Settings(BaseSettings):
 
     # ==================== OpenRouter Config ====================
     open_router_api_key: str = Field(default="", validation_alias="OPENROUTER_API_KEY")
+    # ==================== Tavily Config ====================
+    tavily_api_key: str = ""
 
     # ==================== Messaging Platform Selection ====================
     # Valid: "telegram" | "discord"

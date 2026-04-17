@@ -50,6 +50,7 @@ A lightweight proxy that routes Claude Code's Anthropic API calls to **NVIDIA NI
    - **OpenRouter**: [openrouter.ai/keys](https://openrouter.ai/keys)
    - **LM Studio**: No API key needed. Run locally with [LM Studio](https://lmstudio.ai)
    - **llama.cpp**: No API key needed. Run `llama-server` locally.
+   - **Tavily**: [tavily.com](https://tavily.com) (for web search feature)
 2. Install [Claude Code](https://github.com/anthropics/claude-code)
 
 ### Install `uv`
@@ -248,7 +249,7 @@ alias claude-kimi='ANTHROPIC_BASE_URL="http://localhost:8082" ANTHROPIC_AUTH_TOK
 ### Install as a Package (no clone needed)
 
 ```bash
-uv tool install git+https://github.com/Alishahryar1/free-claude-code.git
+uv tool install git+https://github.com/D4rkMan9/free-claude-code-nim-websearch-fix.git
 fcc-init        # creates ~/.config/free-claude-code/.env from the built-in template
 ```
 
