@@ -262,6 +262,45 @@ free-claude-code    # starts the server
 
 ---
 
+## Web Search (NIM only)
+
+The web search feature allows the model to fetch real-time information using Tavily. It has been tested with NIM models (e.g., Llama 3.1 405b).
+
+### Setup
+
+1. Get a Tavily API key from https://tavily.com.
+2. Create a `.env` file in the project root (if it doesn't exist) and add:
+   ```env
+   TAVILY_API_KEY=your_api_key_here
+   ```
+3. Restart the server after adding the key.
+
+### Usage
+
+When making a request, include the custom `web_search` tool and set `tool_choice` to force its use. Example:
+
+```json
+{
+  "tools": [
+    {
+      "type": "custom",
+      "name": "web_search",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string"},
+          "max_results": {"type": "integer", "default": 5}
+        },
+        "required": ["query"]
+      }
+    }
+  ],
+  "tool_choice": {"type": "tool", "name": "web_search"}
+}
+```
+
+**Note:** The `.env` file is ignored by git (see `.gitignore`). Do not commit your API keys.
+
 ## How It Works
 
 ```
