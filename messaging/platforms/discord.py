@@ -370,7 +370,7 @@ class DiscordPlatform(MessagingPlatform):
         if self._start_task and not self._start_task.done():
             try:
                 await asyncio.wait_for(self._start_task, timeout=5.0)
-            except TimeoutError, asyncio.CancelledError:
+            except (TimeoutError, asyncio.CancelledError):
                 self._start_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._start_task

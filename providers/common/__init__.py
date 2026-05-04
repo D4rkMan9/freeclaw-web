@@ -1,6 +1,11 @@
 """Shared provider utilities used by NIM, OpenRouter, and LM Studio."""
 
-from .error_mapping import append_request_id, get_user_facing_error_message, map_error
+from .error_mapping import (
+    append_request_id,
+    get_user_facing_error_message,
+    is_transient_error,
+    map_error,
+)
 from .heuristic_tool_parser import HeuristicToolParser
 from .message_converter import (
     AnthropicToOpenAIConverter,
@@ -25,6 +30,7 @@ __all__ = [
     "get_block_attr",
     "get_block_type",
     "get_user_facing_error_message",
+    "is_transient_error",
     "map_error",
     "map_stop_reason",
     "set_if_not_none",

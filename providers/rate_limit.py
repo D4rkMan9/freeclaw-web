@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, ClassVar, TypeVar
 
+import httpx
 import openai
 from loguru import logger
 
@@ -184,10 +185,11 @@ class GlobalRateLimiter:
         jitter: float = 1.0,
         **kwargs: Any,
     ) -> Any:
-        """Execute an async callable with rate limiting and retry on 429.
+        """Execute an async callable with rate limiting and retry on 429 / transient errors.
 
         Waits for the proactive limiter before each attempt. On 429, applies
-        exponential backoff with jitter before retrying.
+        exponential backoff with jitter before retrying. Also retries transient
+        connection errors (RemoteProtocolError, ReadError, NetworkError, etc.).
 
         Args:
             fn: Async callable to execute.
@@ -224,6 +226,50 @@ class GlobalRateLimiter:
                     f"Retrying in {delay:.1f}s..."
                 )
                 self.set_blocked(delay)
+                await asyncio.sleep(delay)
+            except openai.APIConnectionError as e:
+                last_exc = e
+                if attempt >= max_retries:
+                    logger.warning(
+                        "Connection error retry exhausted after {} retries",
+                        max_retries,
+                    )
+                    break
+
+                delay = min(base_delay * (2**attempt), max_delay)
+                delay += random.uniform(0, jitter)
+                logger.warning(
+                    "Transient connection error ({}), attempt {}/{}. "
+                    "Retrying in {:.1f}s...",
+                    type(e).__name__,
+                    attempt + 1,
+                    max_retries + 1,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+            except (
+                httpx.RemoteProtocolError,
+                httpx.ReadError,
+                httpx.NetworkError,
+                httpx.ConnectError,
+            ) as e:
+                last_exc = e
+                if attempt >= max_retries:
+                    logger.warning(
+                        "Transient HTTP error retry exhausted after {} retries",
+                        max_retries,
+                    )
+                    break
+
+                delay = min(base_delay * (2**attempt), max_delay)
+                delay += random.uniform(0, jitter)
+                logger.warning(
+                    "Transient HTTP error ({}), attempt {}/{}. Retrying in {:.1f}s...",
+                    type(e).__name__,
+                    attempt + 1,
+                    max_retries + 1,
+                    delay,
+                )
                 await asyncio.sleep(delay)
 
         assert last_exc is not None

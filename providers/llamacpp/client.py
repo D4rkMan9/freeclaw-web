@@ -1,5 +1,6 @@
 """Llama.cpp provider implementation."""
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -9,6 +10,7 @@ from loguru import logger
 
 from providers.base import BaseProvider, ProviderConfig
 from providers.common import get_user_facing_error_message, map_error
+from providers.common.keepalive import with_keepalive
 from providers.rate_limit import GlobalRateLimiter
 
 LLAMACPP_DEFAULT_BASE_URL = "http://localhost:8080/v1"
@@ -21,11 +23,6 @@ class LlamaCppProvider(BaseProvider):
         super().__init__(config)
         self._provider_name = "LLAMACPP"
         self._base_url = (config.base_url or LLAMACPP_DEFAULT_BASE_URL).rstrip("/")
-
-        # We need the base URL without /v1 if the user provided it with /v1,
-        # so we can append /v1/messages safely.
-        # Actually, if they provided http://localhost:8080/v1, we can just use
-        # {base_url}/messages which becomes http://localhost:8080/v1/messages
 
         self._global_rate_limiter = GlobalRateLimiter.get_instance(
             rate_limit=config.rate_limit,
@@ -53,26 +50,21 @@ class LlamaCppProvider(BaseProvider):
         *,
         request_id: str | None = None,
     ) -> AsyncIterator[str]:
-        """Stream response natively via Llama.cpp's Anthropic-compatible endpoint."""
+        """Stream response natively via Llama.cpp's Anthropic-compatible endpoint with keep-alive."""
         tag = self._provider_name
         req_tag = f" request_id={request_id}" if request_id else ""
 
-        # Dump the Anthropic Pydantic model directly into a dict
         body = request.model_dump(exclude_none=True)
 
-        # Remove extra_body, original_model, resolved_provider_model which are internal
         body.pop("extra_body", None)
         body.pop("original_model", None)
         body.pop("resolved_provider_model", None)
 
-        # Translate internal ThinkingConfig to Anthropic API schema
         if "thinking" in body:
             thinking_cfg = body.pop("thinking")
             if isinstance(thinking_cfg, dict) and thinking_cfg.get("enabled"):
-                # Anthropic API requires a budget_tokens value when enabled
                 body["thinking"] = {"type": "enabled"}
 
-        # Ensure max_tokens is present (Claude API requires it)
         if "max_tokens" not in body:
             body["max_tokens"] = 81920
 
@@ -87,8 +79,6 @@ class LlamaCppProvider(BaseProvider):
 
         async with self._global_rate_limiter.concurrency_slot():
             try:
-                # We use execute_with_retry around the streaming request context
-                # To do this safely with httpx streaming, we await the chunk stream
 
                 async def _make_request():
                     request_obj = self._client.build_request(
@@ -117,12 +107,11 @@ class LlamaCppProvider(BaseProvider):
                         )
                         raise e
 
-                async for line in response.aiter_lines():
-                    if line:
-                        yield f"{line}\n"
-                    else:
-                        yield "\n"
+                async for chunk in with_keepalive(self._iter_lines(response)):
+                    yield chunk
 
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 logger.error("{}_ERROR:{} {}: {}", tag, req_tag, type(e).__name__, e)
                 mapped_e = map_error(e)
@@ -139,9 +128,17 @@ class LlamaCppProvider(BaseProvider):
                     req_tag,
                 )
 
-                # Emit an Anthropic-compatible error event
                 error_event = {
                     "type": "error",
                     "error": {"type": "api_error", "message": error_message},
                 }
                 yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+
+    @staticmethod
+    async def _iter_lines(response: httpx.Response) -> AsyncIterator[str]:
+        """Yield SSE lines from an httpx streaming response."""
+        async for line in response.aiter_lines():
+            if line:
+                yield f"{line}\n"
+            else:
+                yield "\n"

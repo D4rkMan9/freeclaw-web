@@ -1,5 +1,6 @@
 """Shared base class for OpenAI-compatible providers (NIM, OpenRouter, LM Studio)."""
 
+import asyncio
 import json
 import uuid
 from abc import abstractmethod
@@ -21,6 +22,7 @@ from providers.common import (
     map_error,
     map_stop_reason,
 )
+from providers.common.keepalive import with_keepalive
 from providers.rate_limit import GlobalRateLimiter
 
 
@@ -118,10 +120,10 @@ class OpenAICompatibleProvider(BaseProvider):
         *,
         request_id: str | None = None,
     ) -> AsyncIterator[str]:
-        """Stream response in Anthropic SSE format."""
+        """Stream response in Anthropic SSE format with keep-alive."""
         with logger.contextualize(request_id=request_id):
-            async for event in self._stream_response_impl(
-                request, input_tokens, request_id
+            async for event in with_keepalive(
+                self._stream_response_impl(request, input_tokens, request_id)
             ):
                 yield event
 
@@ -244,6 +246,8 @@ class OpenAICompatibleProvider(BaseProvider):
                             for event in self._process_tool_call(tc_info, sse):
                                 yield event
 
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 logger.error("{}_ERROR:{} {}: {}", tag, req_tag, type(e).__name__, e)
                 mapped_e = map_error(e)

@@ -31,7 +31,10 @@ router = APIRouter()
 # Web search stream interceptor
 # =============================================================================
 
-async def _intercept_for_web_search(stream, request_data, provider, input_tokens, request_id):
+
+async def _intercept_for_web_search(
+    stream, request_data, provider, input_tokens, request_id
+):
     """
     Wraps a provider stream. If the model emits a tool_use call for web_search,
     intercepts it, runs Tavily, and streams the follow-up response instead.
@@ -39,7 +42,7 @@ async def _intercept_for_web_search(stream, request_data, provider, input_tokens
     """
     buffer = []
     tool_use_id = None
-    tool_name = None
+    tool_name: str = CUSTOM_TOOL_NAME
     tool_input_str = ""
     in_tool_use = False
 
@@ -49,7 +52,9 @@ async def _intercept_for_web_search(stream, request_data, provider, input_tokens
             buffer.append(chunk)
 
         # Decode chunk
-        chunk_str = chunk if isinstance(chunk, str) else chunk.decode("utf-8", errors="replace")
+        chunk_str = (
+            chunk if isinstance(chunk, str) else chunk.decode("utf-8", errors="replace")
+        )
 
         # Parse each SSE data line
         for line in chunk_str.splitlines():
@@ -64,12 +69,23 @@ async def _intercept_for_web_search(stream, request_data, provider, input_tokens
                 # Detect tool_use start
                 cb = data.get("content_block", {})
                 if data.get("type") == "content_block_start":
-                    print(f"[INTERCEPTOR] content_block_start: type={cb.get('type')}, name={cb.get('name')}")
-                if cb.get("type") == "tool_use" and cb.get("name") in (ANTHROPIC_WEB_SEARCH_TYPE, CUSTOM_TOOL_NAME):
+                    logger.debug(
+                        "[INTERCEPTOR] content_block_start: type={}, name={}",
+                        cb.get("type"),
+                        cb.get("name"),
+                    )
+                if cb.get("type") == "tool_use" and cb.get("name") in (
+                    ANTHROPIC_WEB_SEARCH_TYPE,
+                    CUSTOM_TOOL_NAME,
+                ):
                     in_tool_use = True
                     tool_use_id = cb.get("id", f"toolu_{uuid.uuid4().hex[:16]}")
-                    tool_name = cb.get("name")
-                    print(f"[INTERCEPTOR] Detected tool_use! id={tool_use_id}, name={tool_name}")
+                    tool_name = cb.get("name") or CUSTOM_TOOL_NAME
+                    logger.debug(
+                        "[INTERCEPTOR] Detected tool_use! id={}, name={}",
+                        tool_use_id,
+                        tool_name,
+                    )
                     buffer = []  # discard everything before tool_use
             else:
                 # Process deltas and stop when done
@@ -79,10 +95,12 @@ async def _intercept_for_web_search(stream, request_data, provider, input_tokens
                         tool_input_str += delta.get("partial_json", "")
                 elif data.get("type") == "content_block_stop" and tool_use_id:
                     try:
-                        tool_input = json.loads(tool_input_str) if tool_input_str else {}
+                        tool_input = (
+                            json.loads(tool_input_str) if tool_input_str else {}
+                        )
                     except json.JSONDecodeError:
                         tool_input = {"query": tool_input_str}
-                    print(f"[INTERCEPTOR] tool_input={tool_input}")
+                    logger.debug("[INTERCEPTOR] tool_input={}", tool_input)
                     async for search_chunk in stream_web_search_response(
                         model=request_data.model,
                         tool_use_id=tool_use_id,
@@ -98,7 +116,9 @@ async def _intercept_for_web_search(stream, request_data, provider, input_tokens
 
     # End of stream: never detected tool_use? flush buffer.
     if not in_tool_use:
-        print("[INTERCEPTOR] No tool_use detected, yielding buffered original stream")
+        logger.debug(
+            "[INTERCEPTOR] No tool_use detected, yielding buffered original stream"
+        )
         for buffered in buffer:
             yield buffered
 
@@ -114,7 +134,7 @@ async def create_message(
     _auth=Depends(require_api_key),
 ):
     """Create a message (always streaming)."""
-    print("[ROUTES] create_message called")
+    logger.debug("[ROUTES] create_message called")
 
     try:
         if not request_data.messages:
@@ -127,7 +147,7 @@ async def create_message(
 
         # Replace built-in web_search tool with Tavily-backed custom tool
         has_web_search = strip_and_replace_web_search_tool(request_data)
-        print(f"[ROUTES] has_web_search = {has_web_search}")
+        logger.debug("[ROUTES] has_web_search = {}", has_web_search)
 
         # Resolve provider from the model-aware mapping
         provider_type = Settings.parse_provider_type(
@@ -157,7 +177,9 @@ async def create_message(
 
         # If web search is active, wrap the stream with our interceptor
         final_stream = (
-            _intercept_for_web_search(raw_stream, request_data, provider, input_tokens, request_id)
+            _intercept_for_web_search(
+                raw_stream, request_data, provider, input_tokens, request_id
+            )
             if has_web_search
             else raw_stream
         )

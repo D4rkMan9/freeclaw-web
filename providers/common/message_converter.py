@@ -159,14 +159,16 @@ class AnthropicToOpenAIConverter:
             input_schema = get_block_attr(tool, "input_schema")
             # For builtin tools, input_schema may be None; use empty dict
             parameters = input_schema if input_schema is not None else {}
-            result.append({
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": description,
-                    "parameters": parameters,
-                },
-            })
+            result.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": description,
+                        "parameters": parameters,
+                    },
+                }
+            )
         return result
 
     @staticmethod
@@ -243,6 +245,8 @@ def build_base_request_body(
     if tools:
         body["tools"] = AnthropicToOpenAIConverter.convert_tools(tools)
     tool_choice = getattr(request_data, "tool_choice", None)
-    set_if_not_none(body, "tool_choice", AnthropicToOpenAIConverter.convert_tool_choice(tool_choice))
+    set_if_not_none(
+        body, "tool_choice", AnthropicToOpenAIConverter.convert_tool_choice(tool_choice)
+    )
 
     return body

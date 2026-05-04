@@ -13,6 +13,30 @@ from providers.exceptions import (
 )
 from providers.rate_limit import GlobalRateLimiter
 
+# Transient connection errors that may warrant a retry.
+# RemoteProtocolError covers "peer closed connection without sending
+# complete message body" which is the most common provider-side disconnect.
+TRANSIENT_HTTPX_ERRORS = (
+    httpx.RemoteProtocolError,
+    httpx.ReadError,
+    httpx.NetworkError,
+    httpx.ConnectError,
+)
+
+# OpenAI SDK wraps httpx errors inside APIConnectionError.
+TRANSIENT_OPENAI_ERRORS = (openai.APIConnectionError,)
+
+
+def is_transient_error(e: Exception) -> bool:
+    """Return True if the error is a transient connection/retryable error."""
+    if isinstance(e, TRANSIENT_HTTPX_ERRORS):
+        return True
+    if isinstance(e, TRANSIENT_OPENAI_ERRORS):
+        return True
+    if isinstance(e, httpx.HTTPStatusError):
+        return e.response.status_code in (502, 503, 504, 429)
+    return isinstance(e, openai.InternalServerError)
+
 
 def get_user_facing_error_message(
     e: Exception,
@@ -30,10 +54,20 @@ def get_user_facing_error_message(
         return "Provider request timed out."
     if isinstance(e, httpx.ConnectTimeout):
         return "Could not connect to provider."
-    if isinstance(e, TimeoutError):
+    if isinstance(e, httpx.ConnectError):
+        return "Could not connect to provider."
+    if isinstance(e, TIMEOUT_EXCEPTIONS):
         if read_timeout_s is not None:
             return f"Provider request timed out after {read_timeout_s:g}s."
         return "Request timed out."
+    if isinstance(e, TRANSIENT_HTTPX_ERRORS):
+        return "Provider connection was interrupted. Please retry."
+    if isinstance(e, openai.APITimeoutError):
+        if read_timeout_s is not None:
+            return f"Provider request timed out after {read_timeout_s:g}s."
+        return "Provider request timed out."
+    if isinstance(e, openai.APIConnectionError):
+        return "Provider connection was interrupted. Please retry."
 
     if isinstance(e, (RateLimitError, openai.RateLimitError)):
         return "Provider rate limit reached. Please retry shortly."
@@ -51,6 +85,10 @@ def get_user_facing_error_message(
         return "Provider request failed."
 
     return "Provider request failed unexpectedly."
+
+
+# Timeout exceptions we handle (TimeoutError is the stdlib one)
+TIMEOUT_EXCEPTIONS: tuple[type[Exception], ...] = (TimeoutError,)
 
 
 def append_request_id(message: str, request_id: str | None) -> str:
@@ -79,6 +117,8 @@ def map_error(e: Exception) -> Exception:
         if "overloaded" in raw_message.lower() or "capacity" in raw_message.lower():
             return OverloadedError(message, raw_error=raw_message)
         return APIError(message, status_code=500, raw_error=str(e))
+    if isinstance(e, openai.APIConnectionError):
+        return OverloadedError(message, raw_error=str(e))
     if isinstance(e, openai.APIError):
         return APIError(
             message, status_code=getattr(e, "status_code", 500), raw_error=str(e)
@@ -99,5 +139,9 @@ def map_error(e: Exception) -> Exception:
                 return OverloadedError(message, raw_error=str(e))
             return APIError(message, status_code=status, raw_error=str(e))
         return APIError(message, status_code=status, raw_error=str(e))
+
+    # Map transient connection errors as OverloadedError (retryable)
+    if isinstance(e, TRANSIENT_HTTPX_ERRORS):
+        return OverloadedError(message, raw_error=str(e))
 
     return e
