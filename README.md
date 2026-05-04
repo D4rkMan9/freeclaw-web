@@ -63,8 +63,8 @@ If uv is already installed, run uv self update to get the latest version.
 ### Clone & Configure
 
 ```bash
-git clone https://github.com/Alishahryar1/free-claude-code.git
-cd free-claude-code
+git clone https://github.com/D4rkMan9/freeclaw-web
+cd freeclaw-web
 cp .env.example .env
 ```
 
